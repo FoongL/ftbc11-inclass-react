@@ -4,11 +4,22 @@ import React from "react";
 import Counter from "./components/counter.jsx";
 import { FancyBorder } from "./components/fancyBorders";
 
-import { database } from './firebase'
+import { database, storage } from "./firebase";
 
-import {ref, set, push, onChildAdded} from 'firebase/database'
+import {
+  ref,
+  set,
+  push,
+  onChildAdded,
+  remove,
+  onChildRemoved,
+  onValue,
+} from "firebase/database";
 
-const DB_TASKLIST_KEY = 'tasks'
+import {ref as storeRef, uploadBytesResumable, getDownloadURL} from 'firebase/storage'
+
+const DB_TASKLIST_KEY = "tasks";
+const STORE_IMAGE_KEY='images'
 
 const sayHello = (user) =>
   user ? <h4>Hello {user}!</h4> : <h4>Hello Stranger!</h4>;
@@ -22,27 +33,35 @@ class App extends React.Component {
       randomInput: "",
       nameArray: [],
       task: "",
-      taskList:[]
+      taskList: [],
+      file:null,
     };
   }
 
   componentDidMount = () => {
+    const taskListRef = ref(database, DB_TASKLIST_KEY);
+    onChildAdded(taskListRef, (task) => {
+      console.log("Task added:", task.val().name);
+      this.setState((state) => ({
+        taskList: [...state.taskList, { key: task.key, name: task.val().name }],
+      }));
+    });
+    onChildRemoved(taskListRef, (task) => {
+      console.log("Task Removed:", task.val().name);
+      const remainingTasks = this.state.taskList.filter((tasks) => {
+        return tasks.key !== task.key;
+      });
+      console.log("remaining Tasks:", remainingTasks);
+      this.setState({
+        taskList: remainingTasks
+      })
+    });
+    // onValue(taskListRef, (snapShot)=>{
+    //   // const data = snapShot.val()
+    //   // console.log('data:', data)
+    //   console.log('snapShot:', snapShot.val())
 
-    console.log('env:', process.env.REACT_APP_TEST_VAR)
-    // const storedNames = localStorage.getItem("name");
-    // if (storedNames) {
-    //   this.setState({
-    //     nameArray: JSON.parse(storedNames),
-    //   });
-    // }
-    const taskListRef = ref(database, DB_TASKLIST_KEY)
-    onChildAdded(taskListRef, (task)=>{
-      console.log('Task added:', task.val().name)
-      this.setState((state)=>({
-        taskList:[...state.taskList, {key: task.key, name: task.val().name}]
-      }))
-    })
-
+    // })
   };
 
   increment = () => {
@@ -97,27 +116,49 @@ class App extends React.Component {
     });
   };
 
-  handleTaskChange =(e)=>{
+  handleTaskChange = (e) => {
     this.setState({
-      task: e.target.value
-    })
-  }
+      task: e.target.value,
+    });
+  };
 
-  handleTaskSubmit =()=>{
-    // do stuff here
+  handleTaskSubmit = () => {
+    // Upload my file to the storage
     const taskListref = ref(database, DB_TASKLIST_KEY)
-    const newTaskref = push(taskListref)
-    // console.log('newTaskref:', newTaskref)
-    const task ={
-      name: this.state.task,
-      date: new Date()
-    }
-    set(newTaskref, task);
+    const fileRef = storeRef(storage, `${STORE_IMAGE_KEY}/${this.state.file.name}`)
+    uploadBytesResumable(fileRef, this.state.file).then(()=>{
+      getDownloadURL(fileRef).then((url)=>{
+        const task = {
+          name: this.state.task,
+          imgURL: url
+        }
+        push(taskListref, task).then(()=>{
+          this.setState({
+            task: "",
+            file: null
+          });
+        })
+      })
+    })
 
+    // adding new Task to the realtime Database
+    ;
+
+
+  };
+
+  handleFileChange=(e)=>{
     this.setState({
-      task:''
+      file: e.target.files[0]
     })
   }
+
+  handleDelete = (e) => {
+    const { id } = e.target;
+    console.log(id);
+    const taskRef = ref(database, `${DB_TASKLIST_KEY}/${id}`);
+    remove(taskRef);
+  };
 
   render() {
     return (
@@ -139,9 +180,15 @@ class App extends React.Component {
             value={this.state.task}
             onChange={this.handleTaskChange}
           ></input>
+          <input id='imgInput' type='file' onChange={this.handleFileChange}></input>
           <button onClick={this.handleTaskSubmit}>Submit Task</button>
-          {this.state.taskList.map((task)=>(
-            <p key={task.key}>{task.name}</p>
+          {this.state.taskList.map((task) => (
+            <div>
+              <p key={task.key}>{task.name}</p>
+              <button id={task.key} onClick={this.handleDelete}>
+                Delete
+              </button>
+            </div>
           ))}
         </header>
       </div>
